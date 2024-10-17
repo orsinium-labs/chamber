@@ -19,6 +19,10 @@ struct Opt {
     /// The name of the file where to save audio
     #[arg(long, default_value = "recording.wav")]
     wav: String,
+
+    /// For how long to record, in seconds
+    #[arg(long, default_value_t = 3)]
+    duration: u64,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -29,8 +33,8 @@ fn main() -> anyhow::Result<()> {
     let device = if opt.device_in == "default" {
         host.default_input_device()
     } else {
-        let mut devices = host.input_devices()?;
-        devices.find(|x| x.name().map(|y| y == opt.device_in).unwrap_or(false))
+        let devices = host.input_devices()?;
+        find_device(devices, &opt.device_in)
     };
     let device_in = device.expect("failed to find input device");
     println!("Input device: {}", device_in.name()?);
@@ -39,8 +43,8 @@ fn main() -> anyhow::Result<()> {
     let device = if opt.device_in == "default" {
         host.default_output_device()
     } else {
-        let mut devices = host.output_devices()?;
-        devices.find(|x| x.name().map(|y| y == opt.device_out).unwrap_or(false))
+        let devices = host.output_devices()?;
+        find_device(devices, &opt.device_out)
     };
     let device_out = device.expect("failed to find output device");
     println!("Output device: {}", device_out.name()?);
@@ -68,13 +72,24 @@ fn main() -> anyhow::Result<()> {
     let stream_out = make_output_stream(config, device_out, recv)?;
     stream_out.play()?;
 
-    // Let recording go for roughly three seconds.
-    std::thread::sleep(std::time::Duration::from_secs(3));
+    std::thread::sleep(std::time::Duration::from_secs(opt.duration));
+
     drop(stream_in);
     drop(stream_out);
     // writer.finalize()?;
     println!("Recording {} complete!", &opt.wav);
     Ok(())
+}
+
+fn find_device<D: Iterator<Item = Device>>(devices: D, name: &str) -> Option<Device> {
+    for device in devices {
+        if let Ok(device_name) = device.name() {
+            if device_name == name {
+                return Some(device);
+            }
+        }
+    }
+    None
 }
 
 fn make_input_stream(
