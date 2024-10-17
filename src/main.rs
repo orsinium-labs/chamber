@@ -19,10 +19,6 @@ struct Opt {
     /// The name of the file where to save audio
     #[arg(long, default_value = "recording.wav")]
     wav: String,
-
-    /// For how long to record, in seconds
-    #[arg(long, default_value_t = 3)]
-    duration: u64,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -65,14 +61,14 @@ fn main() -> anyhow::Result<()> {
     };
 
     // Run the input stream on a separate thread.
-    println!("Listening...");
     let stream_in = make_input_stream(config.clone(), device_in, recorder)?;
     stream_in.play()?;
 
     let stream_out = make_output_stream(config, device_out, recv)?;
     stream_out.play()?;
 
-    std::thread::sleep(std::time::Duration::from_secs(opt.duration));
+    println!("Listening, press Enter to exit...");
+    _ = std::io::stdin().read_line(&mut String::new());
 
     drop(stream_in);
     drop(stream_out);
