@@ -1,11 +1,9 @@
 use clap::Parser;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use cpal::{Device, FromSample, Sample, Stream, SupportedStreamConfig};
+use cpal::{Device, Stream, SupportedStreamConfig};
 use std::fs::File;
 use std::io::BufWriter;
-use std::sync::{Arc, Mutex};
-
-type WavWriterHandle = Arc<Mutex<Option<hound::WavWriter<BufWriter<File>>>>>;
+use std::sync::mpsc::{channel, Receiver, Sender};
 
 #[derive(Parser, Debug)]
 #[command(version, about = "record and echo audio inputs", long_about = None)]
@@ -52,55 +50,46 @@ fn main() -> anyhow::Result<()> {
         .expect("failed to get default input config");
     println!("Default input config: {:?}", config);
 
+    let (send, recv) = channel::<f32>();
+
     // The WAV file we're recording to.
     let spec = wav_spec_from_config(&config);
     let writer = hound::WavWriter::create(&opt.wav, spec)?;
-    let writer = Arc::new(Mutex::new(Some(writer)));
+    let recorder = Recorder {
+        wav_writer: writer,
+        send,
+    };
 
     // Run the input stream on a separate thread.
-    let stream = make_stream(config, device_in, writer.clone())?;
-    println!("Recording...");
-    stream.play()?;
+    println!("Listening...");
+    let stream_in = make_input_stream(config.clone(), device_in, recorder)?;
+    stream_in.play()?;
+
+    let stream_out = make_output_stream(config, device_out, recv)?;
+    stream_out.play()?;
 
     // Let recording go for roughly three seconds.
     std::thread::sleep(std::time::Duration::from_secs(3));
-    drop(stream);
-    writer.lock().unwrap().take().unwrap().finalize()?;
+    drop(stream_in);
+    drop(stream_out);
+    // writer.finalize()?;
     println!("Recording {} complete!", &opt.wav);
     Ok(())
 }
 
-fn make_stream(
+fn make_input_stream(
     config: SupportedStreamConfig,
     device: Device,
-    writer: WavWriterHandle,
+    mut recorder: Recorder,
 ) -> anyhow::Result<Stream> {
     let err_fn = move |err| {
         eprintln!("an error occurred on stream: {}", err);
     };
     use cpal::SampleFormat::*;
     let stream = match config.sample_format() {
-        I8 => device.build_input_stream(
-            &config.into(),
-            move |data, _: &_| write_input_data::<i8, i8>(data, &writer),
-            err_fn,
-            None,
-        ),
-        I16 => device.build_input_stream(
-            &config.into(),
-            move |data, _: &_| write_input_data::<i16, i16>(data, &writer),
-            err_fn,
-            None,
-        ),
-        I32 => device.build_input_stream(
-            &config.into(),
-            move |data, _: &_| write_input_data::<i32, i32>(data, &writer),
-            err_fn,
-            None,
-        ),
         F32 => device.build_input_stream(
             &config.into(),
-            move |data, _: &_| write_input_data::<f32, f32>(data, &writer),
+            move |data, _: &_| recorder.read(data),
             err_fn,
             None,
         ),
@@ -111,34 +100,59 @@ fn make_stream(
     Ok(stream?)
 }
 
-fn sample_format(format: cpal::SampleFormat) -> hound::SampleFormat {
-    if format.is_float() {
-        hound::SampleFormat::Float
-    } else {
-        hound::SampleFormat::Int
-    }
+fn make_output_stream(
+    config: SupportedStreamConfig,
+    device: Device,
+    recv: Receiver<f32>,
+) -> anyhow::Result<Stream> {
+    let err_fn = move |err| {
+        eprintln!("an error occurred on stream: {}", err);
+    };
+    use cpal::SampleFormat::*;
+    let stream = match config.sample_format() {
+        F32 => device.build_output_stream(
+            &config.into(),
+            move |output, _: &_| {
+                for sample in output.iter_mut() {
+                    *sample = recv.recv().unwrap()
+                }
+            },
+            err_fn,
+            None,
+        ),
+        sample_format => {
+            anyhow::bail!("Unsupported sample format '{sample_format}'")
+        }
+    };
+    Ok(stream?)
 }
 
 fn wav_spec_from_config(config: &cpal::SupportedStreamConfig) -> hound::WavSpec {
+    let sample_format = config.sample_format();
     hound::WavSpec {
-        channels: config.channels() as _,
-        sample_rate: config.sample_rate().0 as _,
-        bits_per_sample: (config.sample_format().sample_size() * 8) as _,
-        sample_format: sample_format(config.sample_format()),
+        channels: config.channels(),
+        sample_rate: config.sample_rate().0,
+        bits_per_sample: (sample_format.sample_size() * 8) as u16,
+        sample_format: if sample_format.is_float() {
+            hound::SampleFormat::Float
+        } else {
+            hound::SampleFormat::Int
+        },
     }
 }
 
-fn write_input_data<T, U>(input: &[T], writer: &WavWriterHandle)
-where
-    T: Sample,
-    U: Sample + hound::Sample + FromSample<T>,
-{
-    if let Ok(mut guard) = writer.try_lock() {
-        if let Some(writer) = guard.as_mut() {
-            for &sample in input.iter() {
-                let sample: U = U::from_sample(sample);
-                writer.write_sample(sample).ok();
-            }
+/// Recorder receives audio from input, writes it into a wav file, and sends it to output.
+struct Recorder {
+    wav_writer: hound::WavWriter<BufWriter<File>>,
+    send: Sender<f32>,
+}
+
+impl Recorder {
+    fn read(&mut self, input: &[f32]) {
+        for &sample in input.iter() {
+            // let sample = f32::from_sample(sample);
+            self.wav_writer.write_sample(sample).unwrap();
+            self.send.send(sample).unwrap();
         }
     }
 }
