@@ -4,4 +4,8 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-cpal = "0.15.3"
+anyhow = "1.0.89"
+cpal = { version = "0.15.3" }
+# cpal = { version = "0.15.3", features = ["jack"] }
+clap = { version = "4.5.20", features = ["derive"] }
+hound = "3.5.1"
