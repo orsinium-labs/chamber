@@ -73,7 +73,6 @@ fn main() -> anyhow::Result<()> {
     drop(stream_in);
     drop(stream_out);
     // writer.finalize()?;
-    println!("Recording {} complete!", &opt.wav);
     Ok(())
 }
 
@@ -125,7 +124,7 @@ fn make_output_stream(
             &config.into(),
             move |output, _: &_| {
                 for sample in output.iter_mut() {
-                    *sample = recv.recv().unwrap()
+                    *sample = recv.recv().unwrap_or_default();
                 }
             },
             err_fn,
