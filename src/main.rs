@@ -77,13 +77,21 @@ fn main() -> anyhow::Result<()> {
 }
 
 fn find_device<D: Iterator<Item = Device>>(devices: D, name: &str) -> Option<Device> {
+    let mut names = Vec::new();
     for device in devices {
         if let Ok(device_name) = device.name() {
             if device_name == name {
                 return Some(device);
             }
+            names.push(device_name);
         }
     }
+    println!();
+    println!(r#"Device "{name}" not found. Available devices:"#);
+    for name in names {
+        println!(r#"  "{name}""#);
+    }
+    println!();
     None
 }
 
