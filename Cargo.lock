@@ -175,6 +175,7 @@ dependencies = [
  "anyhow",
  "clap",
  "cpal",
+ "dasp_sample",
  "hound",
 ]
 

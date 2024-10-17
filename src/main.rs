@@ -1,6 +1,7 @@
 use clap::Parser;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use cpal::{Device, Stream, SupportedStreamConfig};
+use cpal::{Device, FromSample, Stream, SupportedStreamConfig};
+use dasp_sample::ToSample;
 use std::fs::File;
 use std::io::BufWriter;
 use std::sync::mpsc::{channel, Receiver, Sender};
@@ -105,14 +106,32 @@ fn make_input_stream(
     };
     use cpal::SampleFormat::*;
     let stream = match config.sample_format() {
+        I8 => device.build_input_stream(
+            &config.into(),
+            move |data, _: &_| recorder.read::<i8>(data),
+            err_fn,
+            None,
+        ),
+        I16 => device.build_input_stream(
+            &config.into(),
+            move |data, _: &_| recorder.read::<i16>(data),
+            err_fn,
+            None,
+        ),
+        I32 => device.build_input_stream(
+            &config.into(),
+            move |data, _: &_| recorder.read::<i32>(data),
+            err_fn,
+            None,
+        ),
         F32 => device.build_input_stream(
             &config.into(),
-            move |data, _: &_| recorder.read(data),
+            move |data, _: &_| recorder.read::<f32>(data),
             err_fn,
             None,
         ),
         sample_format => {
-            anyhow::bail!("Unsupported sample format '{sample_format}'")
+            anyhow::bail!("Unsupported input sample format '{sample_format}'")
         }
     };
     Ok(stream?)
@@ -128,9 +147,42 @@ fn make_output_stream(
     };
     use cpal::SampleFormat::*;
     let stream = match config.sample_format() {
+        I8 => device.build_output_stream(
+            &config.into(),
+            move |output: &mut [i8], _: &_| {
+                for sample in output.iter_mut() {
+                    let new_value = recv.recv().unwrap_or_default();
+                    *sample = i8::from_sample_(new_value);
+                }
+            },
+            err_fn,
+            None,
+        ),
+        I16 => device.build_output_stream(
+            &config.into(),
+            move |output: &mut [i16], _: &_| {
+                for sample in output.iter_mut() {
+                    let new_value = recv.recv().unwrap_or_default();
+                    *sample = i16::from_sample_(new_value);
+                }
+            },
+            err_fn,
+            None,
+        ),
+        I32 => device.build_output_stream(
+            &config.into(),
+            move |output: &mut [i32], _: &_| {
+                for sample in output.iter_mut() {
+                    let new_value = recv.recv().unwrap_or_default();
+                    *sample = i32::from_sample_(new_value);
+                }
+            },
+            err_fn,
+            None,
+        ),
         F32 => device.build_output_stream(
             &config.into(),
-            move |output, _: &_| {
+            move |output: &mut [f32], _: &_| {
                 for sample in output.iter_mut() {
                     *sample = recv.recv().unwrap_or_default();
                 }
@@ -139,7 +191,7 @@ fn make_output_stream(
             None,
         ),
         sample_format => {
-            anyhow::bail!("Unsupported sample format '{sample_format}'")
+            anyhow::bail!("Unsupported output sample format '{sample_format}'")
         }
     };
     Ok(stream?)
@@ -166,11 +218,14 @@ struct Recorder {
 }
 
 impl Recorder {
-    fn read(&mut self, input: &[f32]) {
+    fn read<T>(&mut self, input: &[T])
+    where
+        T: ToSample<f32> + hound::Sample + Copy,
+    {
         for &sample in input.iter() {
-            // let sample = f32::from_sample(sample);
             self.wav_writer.write_sample(sample).unwrap();
-            self.send.send(sample).unwrap();
+            let float_sample: f32 = sample.to_sample_();
+            self.send.send(float_sample).unwrap();
         }
     }
 }
