@@ -1,9 +1,11 @@
 use clap::Parser;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use cpal::{FromSample, Sample};
+use cpal::{Device, FromSample, Sample, Stream, SupportedStreamConfig};
 use std::fs::File;
 use std::io::BufWriter;
 use std::sync::{Arc, Mutex};
+
+type WavWriterHandle = Arc<Mutex<Option<hound::WavWriter<BufWriter<File>>>>>;
 
 #[derive(Parser, Debug)]
 #[command(version, about = "record and echo audio inputs", long_about = None)]
@@ -21,7 +23,7 @@ struct Opt {
     wav: String,
 }
 
-fn main() -> Result<(), anyhow::Error> {
+fn main() -> anyhow::Result<()> {
     let opt = Opt::parse();
     let host = cpal::default_host();
 
@@ -42,12 +44,12 @@ fn main() -> Result<(), anyhow::Error> {
         let mut devices = host.output_devices()?;
         devices.find(|x| x.name().map(|y| y == opt.device_out).unwrap_or(false))
     };
-    let device_out = device.expect("failed to find input device");
+    let device_out = device.expect("failed to find output device");
     println!("Output device: {}", device_out.name()?);
 
     let config = device_in
         .default_input_config()
-        .expect("Failed to get default input config");
+        .expect("failed to get default input config");
     println!("Default input config: {:?}", config);
 
     // The WAV file we're recording to.
@@ -69,10 +71,10 @@ fn main() -> Result<(), anyhow::Error> {
 }
 
 fn make_stream(
-    config: cpal::SupportedStreamConfig,
-    device: cpal::Device,
-    writer: Arc<Mutex<Option<hound::WavWriter<BufWriter<File>>>>>,
-) -> anyhow::Result<cpal::Stream> {
+    config: SupportedStreamConfig,
+    device: Device,
+    writer: WavWriterHandle,
+) -> anyhow::Result<Stream> {
     let err_fn = move |err| {
         eprintln!("an error occurred on stream: {}", err);
     };
@@ -125,8 +127,6 @@ fn wav_spec_from_config(config: &cpal::SupportedStreamConfig) -> hound::WavSpec 
         sample_format: sample_format(config.sample_format()),
     }
 }
-
-type WavWriterHandle = Arc<Mutex<Option<hound::WavWriter<BufWriter<File>>>>>;
 
 fn write_input_data<T, U>(input: &[T], writer: &WavWriterHandle)
 where
