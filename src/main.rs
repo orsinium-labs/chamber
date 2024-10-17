@@ -8,12 +8,16 @@ use std::sync::{Arc, Mutex};
 #[derive(Parser, Debug)]
 #[command(version, about = "record and echo audio inputs", long_about = None)]
 struct Opt {
-    /// The audio device to use
-    #[arg(short, long, default_value = "default")]
-    device: String,
+    /// The audio device to use for recording
+    #[arg(long, default_value = "default")]
+    device_in: String,
+
+    /// The audio device to use for playing
+    #[arg(long, default_value = "default")]
+    device_out: String,
 
     /// The name of the file where to save audio
-    #[arg(short, long, default_value = "recording.wav")]
+    #[arg(long, default_value = "recording.wav")]
     wav: String,
 }
 
@@ -21,17 +25,27 @@ fn main() -> Result<(), anyhow::Error> {
     let opt = Opt::parse();
     let host = cpal::default_host();
 
-    // Set up the input device and stream with the default input config.
-    let device = if opt.device == "default" {
+    // detect input device
+    let device = if opt.device_in == "default" {
         host.default_input_device()
     } else {
         let mut devices = host.input_devices()?;
-        devices.find(|x| x.name().map(|y| y == opt.device).unwrap_or(false))
+        devices.find(|x| x.name().map(|y| y == opt.device_in).unwrap_or(false))
     };
-    let device = device.expect("failed to find input device");
-    println!("Input device: {}", device.name()?);
+    let device_in = device.expect("failed to find input device");
+    println!("Input device: {}", device_in.name()?);
 
-    let config = device
+    // detect output device
+    let device = if opt.device_in == "default" {
+        host.default_output_device()
+    } else {
+        let mut devices = host.output_devices()?;
+        devices.find(|x| x.name().map(|y| y == opt.device_out).unwrap_or(false))
+    };
+    let device_out = device.expect("failed to find input device");
+    println!("Output device: {}", device_out.name()?);
+
+    let config = device_in
         .default_input_config()
         .expect("Failed to get default input config");
     println!("Default input config: {:?}", config);
@@ -41,11 +55,9 @@ fn main() -> Result<(), anyhow::Error> {
     let writer = hound::WavWriter::create(&opt.wav, spec)?;
     let writer = Arc::new(Mutex::new(Some(writer)));
 
-    // A flag to indicate that recording is in progress.
-    println!("Begin recording...");
-
     // Run the input stream on a separate thread.
-    let stream = make_stream(config, device, writer.clone())?;
+    let stream = make_stream(config, device_in, writer.clone())?;
+    println!("Recording...");
     stream.play()?;
 
     // Let recording go for roughly three seconds.
@@ -64,38 +76,37 @@ fn make_stream(
     let err_fn = move |err| {
         eprintln!("an error occurred on stream: {}", err);
     };
+    use cpal::SampleFormat::*;
     let stream = match config.sample_format() {
-        cpal::SampleFormat::I8 => device.build_input_stream(
+        I8 => device.build_input_stream(
             &config.into(),
             move |data, _: &_| write_input_data::<i8, i8>(data, &writer),
             err_fn,
             None,
-        )?,
-        cpal::SampleFormat::I16 => device.build_input_stream(
+        ),
+        I16 => device.build_input_stream(
             &config.into(),
             move |data, _: &_| write_input_data::<i16, i16>(data, &writer),
             err_fn,
             None,
-        )?,
-        cpal::SampleFormat::I32 => device.build_input_stream(
+        ),
+        I32 => device.build_input_stream(
             &config.into(),
             move |data, _: &_| write_input_data::<i32, i32>(data, &writer),
             err_fn,
             None,
-        )?,
-        cpal::SampleFormat::F32 => device.build_input_stream(
+        ),
+        F32 => device.build_input_stream(
             &config.into(),
             move |data, _: &_| write_input_data::<f32, f32>(data, &writer),
             err_fn,
             None,
-        )?,
+        ),
         sample_format => {
-            return Err(anyhow::Error::msg(format!(
-                "Unsupported sample format '{sample_format}'"
-            )))
+            anyhow::bail!("Unsupported sample format '{sample_format}'")
         }
     };
-    Ok(stream)
+    Ok(stream?)
 }
 
 fn sample_format(format: cpal::SampleFormat) -> hound::SampleFormat {
