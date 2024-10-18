@@ -1,3 +1,5 @@
+#![deny(clippy::pedantic)]
+
 use clap::Parser;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{Device, FromSample, Stream, SupportedStreamConfig};
@@ -49,7 +51,7 @@ fn main() -> anyhow::Result<()> {
     let config = device_in
         .default_input_config()
         .expect("failed to get default input config");
-    println!("Default input config: {:?}", config);
+    println!("Default input config: {config:?}");
 
     let (send, recv) = channel::<f32>();
 
@@ -62,10 +64,10 @@ fn main() -> anyhow::Result<()> {
     };
 
     // Run the input stream on a separate thread.
-    let stream_in = make_input_stream(config.clone(), device_in, recorder)?;
+    let stream_in = make_input_stream(config.clone(), &device_in, recorder)?;
     stream_in.play()?;
 
-    let stream_out = make_output_stream(config, device_out, recv)?;
+    let stream_out = make_output_stream(config, &device_out, recv)?;
     stream_out.play()?;
 
     println!("Listening, press Enter to exit...");
@@ -98,33 +100,33 @@ fn find_device<D: Iterator<Item = Device>>(devices: D, name: &str) -> Option<Dev
 
 fn make_input_stream(
     config: SupportedStreamConfig,
-    device: Device,
+    device: &Device,
     mut recorder: Recorder,
 ) -> anyhow::Result<Stream> {
+    use cpal::SampleFormat;
     let err_fn = move |err| {
-        eprintln!("an error occurred on stream: {}", err);
+        eprintln!("an error occurred on stream: {err}");
     };
-    use cpal::SampleFormat::*;
     let stream = match config.sample_format() {
-        I8 => device.build_input_stream(
+        SampleFormat::I8 => device.build_input_stream(
             &config.into(),
             move |data, _: &_| recorder.read::<i8>(data),
             err_fn,
             None,
         ),
-        I16 => device.build_input_stream(
+        SampleFormat::I16 => device.build_input_stream(
             &config.into(),
             move |data, _: &_| recorder.read::<i16>(data),
             err_fn,
             None,
         ),
-        I32 => device.build_input_stream(
+        SampleFormat::I32 => device.build_input_stream(
             &config.into(),
             move |data, _: &_| recorder.read::<i32>(data),
             err_fn,
             None,
         ),
-        F32 => device.build_input_stream(
+        SampleFormat::F32 => device.build_input_stream(
             &config.into(),
             move |data, _: &_| recorder.read::<f32>(data),
             err_fn,
@@ -139,15 +141,15 @@ fn make_input_stream(
 
 fn make_output_stream(
     config: SupportedStreamConfig,
-    device: Device,
+    device: &Device,
     recv: Receiver<f32>,
 ) -> anyhow::Result<Stream> {
+    use cpal::SampleFormat;
     let err_fn = move |err| {
-        eprintln!("an error occurred on stream: {}", err);
+        eprintln!("an error occurred on stream: {err}");
     };
-    use cpal::SampleFormat::*;
     let stream = match config.sample_format() {
-        I8 => device.build_output_stream(
+        SampleFormat::I8 => device.build_output_stream(
             &config.into(),
             move |output: &mut [i8], _: &_| {
                 for sample in output.iter_mut() {
@@ -158,7 +160,7 @@ fn make_output_stream(
             err_fn,
             None,
         ),
-        I16 => device.build_output_stream(
+        SampleFormat::I16 => device.build_output_stream(
             &config.into(),
             move |output: &mut [i16], _: &_| {
                 for sample in output.iter_mut() {
@@ -169,7 +171,7 @@ fn make_output_stream(
             err_fn,
             None,
         ),
-        I32 => device.build_output_stream(
+        SampleFormat::I32 => device.build_output_stream(
             &config.into(),
             move |output: &mut [i32], _: &_| {
                 for sample in output.iter_mut() {
@@ -180,7 +182,7 @@ fn make_output_stream(
             err_fn,
             None,
         ),
-        F32 => device.build_output_stream(
+        SampleFormat::F32 => device.build_output_stream(
             &config.into(),
             move |output: &mut [f32], _: &_| {
                 for sample in output.iter_mut() {
@@ -197,6 +199,7 @@ fn make_output_stream(
     Ok(stream?)
 }
 
+#[expect(clippy::cast_possible_truncation)]
 fn wav_spec_from_config(config: &cpal::SupportedStreamConfig) -> hound::WavSpec {
     let sample_format = config.sample_format();
     hound::WavSpec {
@@ -222,7 +225,7 @@ impl Recorder {
     where
         T: ToSample<f32> + hound::Sample + Copy,
     {
-        for &sample in input.iter() {
+        for &sample in input {
             self.wav_writer.write_sample(sample).unwrap();
             let float_sample: f32 = sample.to_sample_();
             self.send.send(float_sample).unwrap();
