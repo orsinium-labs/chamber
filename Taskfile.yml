@@ -1,0 +1,50 @@
+# https://taskfile.dev
+version: "3"
+
+vars:
+  CARGO_BIN: ~/.cargo/bin/
+
+tasks:
+  install-cross:
+    status:
+      - which cross
+    cmds:
+      - cargo install cross
+
+  check:
+    cmds:
+      - cargo check --all {{.CLI_ARGS}}
+
+  format:
+    cmds:
+      - cargo fmt --all {{.CLI_ARGS}}
+
+  lint:
+    cmds:
+      - cargo clippy {{.CLI_ARGS}} --examples --tests --bins
+
+  release:
+    desc: "build and upload a new release"
+    cmds:
+      - which gh
+      - test {{.CLI_ARGS}}
+      - cat Cargo.toml | grep -F 'version = "{{.CLI_ARGS}}"'
+      - cargo publish
+      - git tag {{.CLI_ARGS}}
+      - git push
+      - git push --tags
+      - gh release create --generate-notes {{.CLI_ARGS}}
+
+  build-all:
+    deps:
+      - install-cross
+    cmds:
+      - cargo build --all-targets --release
+      # - cross build --target x86_64-pc-windows-gnu
+
+  all:
+    desc: "run all code formatters, linters, and tests"
+    cmds:
+      - task: format
+      - task: check
+      - task: lint
