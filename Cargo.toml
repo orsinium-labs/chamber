@@ -2,11 +2,16 @@
 name = "chamber"
 version = "0.1.0"
 edition = "2021"
+authors = ["Gram <git@orsinium.dev>"]
+description = "A CLI tool that listens to audio input, saves it to a WAV file, and plays it back"
+repository = "https://github.com/orsinium-labs/chamber"
+license = "MIT"
+keywords = ["audio", "mic", "microphone", "wav", "dsp"]
+categories = ["multimedia::audio", "command-line-interface"]
 
 [dependencies]
 anyhow = "1.0.89"
 cpal = { version = "0.15.3" }
 dasp_sample = { version = "0.11.0" }
-# cpal = { version = "0.15.3", features = ["jack"] }
 clap = { version = "4.5.20", features = ["derive"] }
 hound = "3.5.1"
